@@ -105,8 +105,8 @@
           <ng-template #noFeature><section class="panel empty-state large">请选择一个技术特征进行编辑。</section></ng-template>
 
           <section class="panel support-panel">
-            <div class="panel-heading"><span>说明书支持依据</span><span class="heading-actions"><p-badge [value]="selectedFeature?.supportIds?.length || 0" severity="success" /><p-button label="新增段落" icon="pi pi-plus" size="small" [disabled]="!canEditMainData" (onClick)="service.addParagraph()" /></span></div>
-            <p class="hint">选择段落即建立映射；取消选择会移除映射。只有至少一个段落时可消除“缺少依据”。</p>
+            <div class="panel-heading"><span>说明书支持依据</span><span class="heading-actions"><p-badge [value]="selectedFeatureEvidence.length" severity="success" /><p-button label="新增段落" icon="pi pi-plus" size="small" [disabled]="!canEditMainData" (onClick)="service.addParagraph()" /></span></div>
+            <p class="hint">勾选段落即建立证据记录：记下引用的原文摘录和映射理由，审查员确认后固定；段落或特征正文变更会自动退回待确认。</p>
             <article *ngFor="let paragraph of state.paragraphs" class="paragraph-card" [class.mapped]="selectedFeature && isMapped(selectedFeature, paragraph.id)">
               <label>
                 <input type="checkbox" [checked]="selectedFeature && isMapped(selectedFeature, paragraph.id)" [disabled]="!selectedFeature || !canEditMainData" (change)="selectedFeature && service.toggleParagraphMapping(selectedFeature.id, paragraph.id)">
@@ -118,6 +118,27 @@
                 <p-button label="删除段落" icon="pi pi-trash" severity="danger" [text]="true" size="small" (onClick)="service.deleteParagraph(paragraph.id)" />
               </div>
               <p *ngIf="!canEditMainData">{{ paragraph.text }}</p>
+              <div class="evidence-card" *ngIf="selectedFeature && evidenceForParagraph(selectedFeature.id, paragraph.id) as ev">
+                <div class="evidence-head">
+                  <span class="evidence-chip" [class.confirmed]="statusOf(ev) === 'confirmed'" [class.stale]="statusOf(ev) === 'stale'">
+                    <i class="pi" [class.pi-check-circle]="statusOf(ev) === 'confirmed'" [class.pi-clock]="statusOf(ev) === 'pending'" [class.pi-exclamation-circle]="statusOf(ev) === 'stale'"></i>{{ statusLabel(statusOf(ev)) }}
+                  </span>
+                  <span class="confirmer" *ngIf="ev.confirmedBy">确认人：{{ ev.confirmedBy }} · {{ ev.confirmedAt | date:'MM-dd HH:mm' }}</span>
+                  <span class="confirmer" *ngIf="!ev.confirmedBy">尚未确认</span>
+                </div>
+                <p class="stale-note" *ngIf="statusOf(ev) === 'stale'"><i class="pi pi-info-circle"></i>段落或特征正文在确认后发生变化，证据已退回，请重新核对并确认。</p>
+                <label class="evidence-field">原文摘录
+                  <textarea pTextarea rows="2" [value]="ev.excerpt" [disabled]="!canEditEvidence(ev)" (change)="updateEvidenceField(ev, 'excerpt', $event)"></textarea>
+                </label>
+                <label class="evidence-field">映射理由
+                  <input pInputText [value]="ev.reason" placeholder="说明该段落如何支持此特征" [disabled]="!canEditEvidence(ev)" (change)="updateEvidenceField(ev, 'reason', $event)">
+                </label>
+                <div class="evidence-actions">
+                  <p-button *ngIf="canConfirmEvidence(ev)" label="确认证据" icon="pi pi-check" size="small" (onClick)="service.confirmEvidence(ev.id)" />
+                  <p-button *ngIf="canReopenEvidence(ev)" label="退回重审" icon="pi pi-replay" size="small" severity="secondary" [outlined]="true" (onClick)="service.reopenEvidence(ev.id)" />
+                  <span class="lock-note" *ngIf="statusOf(ev) === 'confirmed'"><i class="pi pi-lock"></i>已确认固定，退回后才可修改</span>
+                </div>
+              </div>
             </article>
           </section>
         </div>
@@ -125,6 +146,7 @@
         <div class="mapping-summary">
           <div><span>特征覆盖</span><strong>{{ claimFeatures.length }}</strong></div>
           <div><span>已建立依据</span><strong>{{ mappedFeatureCount }}</strong></div>
+          <div><span>证据已确认</span><strong>{{ confirmedEvidenceCount }} / {{ state.evidence.length }}</strong></div>
           <div><span>待清理映射</span><strong>{{ state.orphanMappings.length }}</strong></div>
           <div><span>批注总数</span><strong>{{ state.annotations.length }}</strong></div>
         </div>
@@ -199,6 +221,18 @@
             <h3>已删除特征遗留的映射</h3>
             <div class="orphan-row" *ngFor="let orphan of state.orphanMappings"><span>{{ orphan.reason }} 对应 {{ paragraphLabel(orphan.paragraphId) }}</span><p-button label="清理" size="small" severity="warn" (onClick)="service.clearOrphan(orphan.id)" /></div>
           </div>
+          <div class="evidence-review" *ngIf="evidenceRows.length">
+            <h3>证据确认记录</h3>
+            <div class="evidence-row" *ngFor="let row of evidenceRows" [class.stale]="row.viewStatus === 'stale'">
+              <span class="evidence-chip" [class.confirmed]="row.viewStatus === 'confirmed'" [class.stale]="row.viewStatus === 'stale'">{{ statusLabel(row.viewStatus) }}</span>
+              <div class="evidence-row-body">
+                <strong>{{ featureLabel(row.featureId) }} ← {{ paragraphLabel(row.paragraphId) }}</strong>
+                <small class="excerpt">“{{ row.excerpt }}”</small>
+                <small>{{ row.confirmedBy ? '确认人：' + row.confirmedBy + ' · ' + (row.confirmedAt | date:'yyyy-MM-dd HH:mm') : '尚未确认' }}<em *ngIf="row.reason"> · 理由：{{ row.reason }}</em></small>
+              </div>
+              <p-button label="定位" icon="pi pi-arrow-right" [text]="true" (onClick)="service.selectFeature(row.featureId); service.setTab('mapping')" />
+            </div>
+          </div>
         </section>
       </div>
     </section>
@@ -207,18 +241,22 @@
       <section class="panel selected-summary" *ngIf="selectedFeature as feature; else noSelection">
         <span class="eyebrow">映射状态</span>
         <h3>{{ feature.label }}</h3>
-        <div class="score-ring" [class.complete]="feature.supportIds.length" [class.incomplete]="!feature.supportIds.length">
-          <strong>{{ feature.supportIds.length }}</strong><small>支持段落</small>
+        <div class="score-ring" [class.complete]="selectedFeatureEvidence.length" [class.incomplete]="!selectedFeatureEvidence.length">
+          <strong>{{ selectedFeatureEvidence.length }}</strong><small>支持段落</small>
         </div>
         <dl>
           <dt>父级</dt><dd>{{ feature.parentId ? featureLabel(feature.parentId) : '顶层特征' }}</dd>
           <dt>引用</dt><dd>{{ feature.referenceIds.length }} 个特征</dd>
+          <dt>证据确认</dt><dd>{{ confirmedOf(feature.id) }} / {{ selectedFeatureEvidence.length }} 条</dd>
           <dt>批注</dt><dd>{{ featureAnnotations.length }} 条</dd>
         </dl>
         <div class="quick-map">
           <strong>支持映射</strong>
-          <span *ngFor="let id of feature.supportIds">{{ paragraphLabel(id) }}</span>
-          <em *ngIf="!feature.supportIds.length">尚未选择说明书段落</em>
+          <span *ngFor="let ev of selectedFeatureEvidence" [class.ev-confirmed]="statusOf(ev) === 'confirmed'" [class.ev-stale]="statusOf(ev) === 'stale'">
+            <i class="pi" [class.pi-check-circle]="statusOf(ev) === 'confirmed'" [class.pi-clock]="statusOf(ev) === 'pending'" [class.pi-exclamation-circle]="statusOf(ev) === 'stale'"></i>
+            {{ paragraphLabel(ev.paragraphId) }} · {{ statusLabel(statusOf(ev)) }}
+          </span>
+          <em *ngIf="!selectedFeatureEvidence.length">尚未选择说明书段落</em>
         </div>
       </section>
       <ng-template #noSelection><section class="panel empty-state">选择技术特征查看映射详情。</section></ng-template>

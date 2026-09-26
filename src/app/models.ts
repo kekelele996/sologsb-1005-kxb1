@@ -21,8 +21,25 @@ export interface Feature {
   text: string
   parentId: string | null
   referenceIds: string[]
-  supportIds: string[]
   ownerRole: Role
+}
+
+export type EvidenceStatus = 'pending' | 'confirmed'
+export type EvidenceViewStatus = 'pending' | 'confirmed' | 'stale'
+
+export interface SupportEvidence {
+  id: string
+  featureId: string
+  paragraphId: string
+  excerpt: string
+  reason: string
+  status: EvidenceStatus
+  createdBy: Role
+  createdAt: string
+  confirmedBy: string | null
+  confirmedAt: string | null
+  paragraphSnapshot: string
+  featureSnapshot: string
 }
 
 export interface Annotation {
@@ -60,6 +77,7 @@ export interface WorkbenchState {
   claims: Claim[]
   paragraphs: Paragraph[]
   features: Feature[]
+  evidence: SupportEvidence[]
   annotations: Annotation[]
   orphanMappings: OrphanMapping[]
   versions: ClaimVersion[]
@@ -73,7 +91,7 @@ export interface WorkbenchState {
 export interface ValidationIssue {
   id: string
   severity: 'error' | 'warning'
-  type: 'cycle' | 'missing-support' | 'orphan-mapping' | 'empty-feature'
+  type: 'cycle' | 'missing-support' | 'orphan-mapping' | 'empty-feature' | 'evidence-pending'
   featureId?: string
   title: string
   detail: string

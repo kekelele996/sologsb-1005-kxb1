@@ -10,7 +10,7 @@ import { BadgeModule } from 'primeng/badge'
 import { DialogModule } from 'primeng/dialog'
 import { TooltipModule } from 'primeng/tooltip'
 import { Subscription } from 'rxjs'
-import type { Annotation, Claim, Feature, Role, ValidationIssue, WorkbenchState } from './models'
+import type { Annotation, Claim, EvidenceViewStatus, Feature, Role, SupportEvidence, ValidationIssue, WorkbenchState } from './models'
 import { WorkbenchService } from './workbench.service'
 
 @Component({
@@ -69,14 +69,32 @@ export class AppComponent implements OnInit, AfterViewInit, OnDestroy {
   get errorCount(): number { return this.issues.filter(item => item.severity === 'error').length }
   get warningCount(): number { return this.issues.filter(item => item.severity === 'warning').length }
   get canEditMainData(): boolean { return this.state.role !== 'viewer' }
-  get mappedFeatureCount(): number { return this.claimFeatures.filter(feature => feature.supportIds.length > 0).length }
+  get selectedFeatureEvidence(): SupportEvidence[] { return this.selectedFeature ? this.state.evidence.filter(item => item.featureId === this.selectedFeature?.id) : [] }
+  get mappedFeatureCount(): number { return this.claimFeatures.filter(feature => this.state.evidence.some(item => item.featureId === feature.id)).length }
+  get confirmedEvidenceCount(): number { return this.state.evidence.filter(item => this.statusOf(item) === 'confirmed').length }
+  get evidenceRows(): Array<SupportEvidence & { viewStatus: EvidenceViewStatus }> {
+    return this.state.evidence.map(item => ({ ...item, viewStatus: this.statusOf(item) }))
+  }
 
   claimLabel(id: string): string { return this.state.claims.find(item => item.id === id)?.title || '未命名权利要求' }
   featureLabel(id: string): string { return this.state.features.find(item => item.id === id)?.label || id }
   paragraphLabel(id: string): string { return this.state.paragraphs.find(item => item.id === id)?.section || id }
-  isMapped(feature: Feature, paragraphId: string): boolean { return feature.supportIds.includes(paragraphId) }
+  isMapped(feature: Feature, paragraphId: string): boolean { return this.state.evidence.some(item => item.featureId === feature.id && item.paragraphId === paragraphId) }
+  evidenceForParagraph(featureId: string, paragraphId: string): SupportEvidence | undefined {
+    return this.state.evidence.find(item => item.featureId === featureId && item.paragraphId === paragraphId)
+  }
+  statusOf(evidence: SupportEvidence): EvidenceViewStatus { return this.service.evidenceStatus(evidence, this.state) }
+  confirmedOf(featureId: string): number { return this.state.evidence.filter(item => item.featureId === featureId && this.statusOf(item) === 'confirmed').length }
+  statusLabel(status: EvidenceViewStatus): string { return ({ pending: '待确认', confirmed: '已确认', stale: '已退回待确认' })[status] }
+  canEditEvidence(evidence: SupportEvidence): boolean { return this.canEditMainData && this.statusOf(evidence) !== 'confirmed' }
+  canConfirmEvidence(evidence: SupportEvidence): boolean { return this.state.role === 'examiner' && this.statusOf(evidence) !== 'confirmed' }
+  canReopenEvidence(evidence: SupportEvidence): boolean { return this.state.role === 'examiner' && this.statusOf(evidence) === 'confirmed' }
   isOwnAnnotation(annotation: Annotation): boolean { return annotation.authorRole === this.state.role }
   ownerLabel(role: Role): string { return ({ author: '代理人', examiner: '审查员', viewer: '观察者' })[role] }
+
+  updateEvidenceField(evidence: SupportEvidence, field: 'excerpt' | 'reason', event: Event): void {
+    this.service.updateEvidence(evidence.id, { [field]: (event.target as HTMLInputElement | HTMLTextAreaElement).value })
+  }
 
   updateClaimField(field: 'title' | 'text' | 'number' | 'independent', event: Event): void {
     const element = event.target as HTMLInputElement
