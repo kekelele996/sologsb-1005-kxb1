@@ -25,6 +25,27 @@ export interface Feature {
   ownerRole: Role
 }
 
+export type EvidenceStatus = 'pending' | 'confirmed'
+
+export interface EvidenceRecord {
+  id: string
+  featureId: string
+  paragraphId: string
+  /** 映射时摘录的说明书原文，用于核对具体引用了哪一句 */
+  excerpt: string
+  /** 建立映射时填写的支持理由 */
+  reason: string
+  status: EvidenceStatus
+  /** 建立证据的角色（代理人 / 审查员） */
+  createdByRole: Role
+  createdByName: string
+  createdAt: string
+  /** 审查员确认后固定的确认信息 */
+  confirmedByRole: Role | null
+  confirmedByName: string | null
+  confirmedAt: string | null
+}
+
 export interface Annotation {
   id: string
   featureId: string
@@ -60,6 +81,7 @@ export interface WorkbenchState {
   claims: Claim[]
   paragraphs: Paragraph[]
   features: Feature[]
+  evidences: EvidenceRecord[]
   annotations: Annotation[]
   orphanMappings: OrphanMapping[]
   versions: ClaimVersion[]
@@ -73,7 +95,7 @@ export interface WorkbenchState {
 export interface ValidationIssue {
   id: string
   severity: 'error' | 'warning'
-  type: 'cycle' | 'missing-support' | 'orphan-mapping' | 'empty-feature'
+  type: 'cycle' | 'missing-support' | 'evidence-pending' | 'orphan-mapping' | 'empty-feature'
   featureId?: string
   title: string
   detail: string

@@ -1,9 +1,11 @@
 import { Injectable, OnDestroy } from '@angular/core'
 import { BehaviorSubject, map, type Observable } from 'rxjs'
-import type { Annotation, Claim, ClaimVersion, Feature, Paragraph, Position, Role, ValidationIssue, WorkbenchState } from './models'
+import type { Annotation, Claim, ClaimVersion, EvidenceRecord, Feature, OrphanMapping, Paragraph, Position, Role, ValidationIssue, WorkbenchState } from './models'
 
 const STORAGE_KEY = 'patent-claim-mapping-workbench-v1'
 const POSITION_KEY = 'patent-claim-mapping-position-v1'
+
+const roleNames: Record<Role, string> = { author: '代理人 · 陈昊', examiner: '审查员 · 李岚', viewer: '观察者' }
 
 const initialClaims: Claim[] = [
   { id: 'claim-1', number: 1, title: '一种自适应展柜环境控制装置', independent: true, text: '一种自适应展柜环境控制装置，包括：柜体；环境传感模块，设置于所述柜体内并用于采集温湿度数据；以及控制模块，与所述环境传感模块通信，并根据所述温湿度数据调节所述柜体的微环境。' },
@@ -25,6 +27,27 @@ const initialFeatures: Feature[] = [
   { id: 'feature-e', claimId: 'claim-2', label: 'E · 对角线布置', text: '多个温湿度传感器沿柜体对角线布置', parentId: null, referenceIds: [], supportIds: ['para-0018'], ownerRole: 'author' },
   { id: 'feature-f', claimId: 'claim-3', label: 'F · 分级调节', text: '基于历史数据与当前数据的偏差分级调节除湿单元', parentId: null, referenceIds: [], supportIds: ['para-0024'], ownerRole: 'author' }
 ]
+/** 种子证据：演示“待确认 / 已确认”两种状态，确认后固定原文摘录、理由与确认人 */
+const initialEvidences: EvidenceRecord[] = [
+  evidence('evidence-a-0012', 'feature-a', 'para-0012', '柜体1形成用于陈列文物的封闭空间。', '明确记载“柜体”这一部件及其封闭陈列空间，直接支持特征文字。', 'confirmed'),
+  evidence('evidence-b-0012', 'feature-b', 'para-0012', '环境传感模块2安装于柜体内部，可采集温度、相对湿度等环境数据，并将数据发送至控制模块3。', '记载传感模块设置于柜体内并采集温湿度数据，与特征“设置于柜体内、采集温湿度数据”一一对应。', 'confirmed'),
+  evidence('evidence-b-0018', 'feature-b', 'para-0018', '在一种实施方式中，多个温湿度传感器沿柜体对角线布置，由此可降低局部气流造成的测量偏差。', '补充温湿度采集的具体实施方式，佐证“温湿度数据”的采集手段。', 'pending'),
+  evidence('evidence-c-0012', 'feature-c', 'para-0012', '并将数据发送至控制模块3', '原文说明传感模块向控制模块发送数据，二者之间存在通信链路。', 'confirmed'),
+  evidence('evidence-c-0031', 'feature-c', 'para-0031', '控制模块与传感模块之间可以采用有线或无线通信。通信链路可周期传输数据，传输周期例如为十秒至五分钟。', '明确通信方式与周期传输，直接支持“与环境传感模块通信”。', 'pending'),
+  evidence('evidence-d-0024', 'feature-d', 'para-0024', '当偏差持续超过阈值时，控制模块启动除湿单元并提高调节频率。', '记载控制模块依据数据偏差启动调节，支持“根据温湿度数据调节微环境”。', 'pending'),
+  evidence('evidence-d-0040', 'feature-d', 'para-0040', '微环境调节包括湿度调节、温度调节及气体交换。', '明确微环境调节范围，支持调节对象“柜体的微环境”。', 'confirmed'),
+  evidence('evidence-e-0018', 'feature-e', 'para-0018', '多个温湿度传感器沿柜体对角线布置', '原文逐字记载对角线布置方式，与特征文字一致。', 'confirmed'),
+  evidence('evidence-f-0024', 'feature-f', 'para-0024', '控制模块可比较当前湿度与预设区间，并结合历史变化趋势生成调节等级。', '记载结合历史变化趋势分级生成调节等级，支持“基于历史与当前偏差分级调节”。', 'confirmed')
+]
+function evidence(id: string, featureId: string, paragraphId: string, excerpt: string, reason: string, status: 'pending' | 'confirmed'): EvidenceRecord {
+  return {
+    id, featureId, paragraphId, excerpt, reason, status,
+    createdByRole: 'author', createdByName: roleNames.author, createdAt: '2026-09-23T08:20:00.000Z',
+    confirmedByRole: status === 'confirmed' ? 'examiner' : null,
+    confirmedByName: status === 'confirmed' ? roleNames.examiner : null,
+    confirmedAt: status === 'confirmed' ? '2026-09-24T06:40:00.000Z' : null
+  }
+}
 const initialAnnotations: Annotation[] = [
   { id: 'annotation-1', featureId: 'feature-b', authorRole: 'examiner', authorName: '审查员 · 李岚', text: '“温湿度数据”是否包括露点等派生数据？建议在从属权利要求中限定。', updatedAt: '2026-09-24T03:10:00.000Z' },
   { id: 'annotation-2', featureId: 'feature-d', authorRole: 'author', authorName: '代理人 · 陈昊', text: '[0024] 已支持分级调节，发布前补充除湿单元与通信模块的连接关系。', updatedAt: '2026-09-24T04:05:00.000Z' }
@@ -32,7 +55,7 @@ const initialAnnotations: Annotation[] = [
 function demoState(): WorkbenchState {
   return {
     claims: initialClaims, paragraphs: initialParagraphs, features: initialFeatures,
-    annotations: initialAnnotations, orphanMappings: [], versions: [],
+    evidences: initialEvidences, annotations: initialAnnotations, orphanMappings: [], versions: [],
     role: 'author', currentUserRole: 'author', selectedClaimId: 'claim-1', selectedFeatureId: 'feature-b', activeTab: 'mapping'
   }
 }
@@ -51,6 +74,7 @@ export class WorkbenchService implements OnDestroy {
   readonly claims$ = this.state$.pipe(map(state => state.claims))
   readonly paragraphs$ = this.state$.pipe(map(state => state.paragraphs))
   readonly features$ = this.state$.pipe(map(state => state.features))
+  readonly evidences$ = this.state$.pipe(map(state => state.evidences))
   readonly annotations$ = this.state$.pipe(map(state => state.annotations))
   readonly role$ = this.state$.pipe(map(state => state.role))
   readonly selectedClaim$ = this.state$.pipe(map(state => state.claims.find(claim => claim.id === state.selectedClaimId) || state.claims[0]))
@@ -68,6 +92,10 @@ export class WorkbenchService implements OnDestroy {
   get snapshot(): WorkbenchState { return clone(this.stateSubject.value) }
   get canUndo(): boolean { return this.past.length > 0 }
   get canRedo(): boolean { return this.future.length > 0 }
+
+  evidencesFor(featureId: string): EvidenceRecord[] {
+    return this.stateSubject.value.evidences.filter(item => item.featureId === featureId)
+  }
 
   selectClaim(id: string): void {
     this.patchState(state => { state.selectedClaimId = id; state.selectedFeatureId = state.features.find(feature => feature.claimId === id)?.id || null })
@@ -117,7 +145,10 @@ export class WorkbenchService implements OnDestroy {
     if (this.stateSubject.value.role === 'viewer') return
     this.commit(state => {
       const paragraph = state.paragraphs.find(item => item.id === id)
-      if (paragraph) Object.assign(paragraph, patch)
+      if (!paragraph) return
+      // 段落正文变化：引用它的已确认证据不再可信，退回待确认
+      if (typeof patch.text === 'string' && patch.text !== paragraph.text) this.revertEvidences(state, { paragraphId: id })
+      Object.assign(paragraph, patch)
     })
   }
 
@@ -125,8 +156,9 @@ export class WorkbenchService implements OnDestroy {
     if (this.stateSubject.value.role === 'viewer') return
     this.commit(state => {
       state.paragraphs = state.paragraphs.filter(item => item.id !== id)
-      state.features.forEach(feature => { feature.supportIds = feature.supportIds.filter(paragraphId => paragraphId !== id) })
+      state.evidences = state.evidences.filter(item => item.paragraphId !== id)
       state.orphanMappings = state.orphanMappings.filter(item => item.paragraphId !== id)
+      this.syncSupportIds(state)
     })
   }
 
@@ -147,7 +179,11 @@ export class WorkbenchService implements OnDestroy {
     if (this.stateSubject.value.role === 'viewer') return
     this.commit(state => {
       const feature = state.features.find(item => item.id === id)
-      if (feature) Object.assign(feature, patch)
+      if (!feature) return
+      // 特征正文变化：该特征的已确认证据失去对应基础，退回待确认
+      if (typeof patch.text === 'string' && patch.text !== feature.text) this.revertEvidences(state, { featureId: id })
+      Object.assign(feature, patch)
+      this.syncSupportIds(state)
     })
   }
 
@@ -156,29 +192,77 @@ export class WorkbenchService implements OnDestroy {
     this.commit(state => {
       const feature = state.features.find(item => item.id === id)
       if (!feature) return
-      feature.supportIds.forEach(paragraphId => state.orphanMappings.push({
-        id: `orphan-${Date.now()}-${paragraphId}`, featureLabel: feature.label, paragraphId,
-        reason: `技术特征“${feature.label}”已删除，但支持段落映射仍被保留。`
+      // 证据随特征一并清理，并保留清理记录供核对
+      state.evidences.filter(item => item.featureId === id).forEach(item => state.orphanMappings.push({
+        id: `orphan-${item.id}`, featureLabel: feature.label, paragraphId: item.paragraphId,
+        reason: `技术特征“${feature.label}”已删除，其支持证据（${state.paragraphs.find(p => p.id === item.paragraphId)?.section || item.paragraphId}）已随之一并清理。`
       }))
+      state.evidences = state.evidences.filter(item => item.featureId !== id)
       state.features = state.features.filter(item => item.id !== id)
       state.features.forEach(item => {
         item.referenceIds = item.referenceIds.filter(refId => refId !== id)
         if (item.parentId === id) item.parentId = null
       })
       state.annotations = state.annotations.filter(item => item.featureId !== id)
+      this.syncSupportIds(state)
       state.selectedFeatureId = state.features.find(item => item.claimId === state.selectedClaimId)?.id || null
     })
   }
 
-  toggleParagraphMapping(featureId: string, paragraphId: string): void {
-    if (this.stateSubject.value.role === 'viewer') return
+  /** 建立支持证据：记录原文摘录与支持理由，初始一律为“待确认” */
+  addEvidence(featureId: string, paragraphId: string, excerpt: string, reason: string): void {
+    const role = this.stateSubject.value.role
+    if (role === 'viewer') return
+    const quote = excerpt.trim()
+    const rationale = reason.trim()
+    if (!quote || !rationale) return
     this.commit(state => {
       const feature = state.features.find(item => item.id === featureId)
-      if (!feature) return
-      const index = feature.supportIds.indexOf(paragraphId)
-      if (index >= 0) feature.supportIds.splice(index, 1)
-      else feature.supportIds.push(paragraphId)
-      state.orphanMappings = state.orphanMappings.filter(item => item.paragraphId !== paragraphId)
+      if (!feature || !state.paragraphs.some(item => item.id === paragraphId)) return
+      if (state.evidences.some(item => item.featureId === featureId && item.paragraphId === paragraphId && item.excerpt === quote)) return
+      state.evidences.push({
+        id: `evidence-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        featureId, paragraphId, excerpt: quote, reason: rationale, status: 'pending',
+        createdByRole: role, createdByName: roleNames[role], createdAt: new Date().toISOString(),
+        confirmedByRole: null, confirmedByName: null, confirmedAt: null
+      })
+      this.syncSupportIds(state)
+    })
+  }
+
+  /** 仅待确认证据可补正原文摘录或理由；已确认证据固定，需先由源文变更退回 */
+  updateEvidence(id: string, patch: { excerpt?: string; reason?: string }): void {
+    if (this.stateSubject.value.role === 'viewer') return
+    this.commit(state => {
+      const record = state.evidences.find(item => item.id === id)
+      if (!record || record.status !== 'pending') return
+      if (typeof patch.excerpt === 'string' && patch.excerpt.trim()) record.excerpt = patch.excerpt.trim()
+      if (typeof patch.reason === 'string' && patch.reason.trim()) record.reason = patch.reason.trim()
+    })
+  }
+
+  /** 仅待确认证据可删除；已确认证据受固定保护 */
+  deleteEvidence(id: string): void {
+    if (this.stateSubject.value.role === 'viewer') return
+    this.commit(state => {
+      const record = state.evidences.find(item => item.id === id)
+      if (!record || record.status === 'confirmed') return
+      state.evidences = state.evidences.filter(item => item.id !== id)
+      this.syncSupportIds(state)
+    })
+  }
+
+  /** 审查员核对原文后确认固定；观察者只读不能确认 */
+  confirmEvidence(id: string): void {
+    const role = this.stateSubject.value.role
+    if (role !== 'examiner') return
+    this.commit(state => {
+      const record = state.evidences.find(item => item.id === id)
+      if (!record || record.status === 'confirmed') return
+      record.status = 'confirmed'
+      record.confirmedByRole = 'examiner'
+      record.confirmedByName = roleNames.examiner
+      record.confirmedAt = new Date().toISOString()
     })
   }
 
@@ -190,9 +274,8 @@ export class WorkbenchService implements OnDestroy {
     const trimmed = text.trim()
     if (!trimmed) return
     const role = this.stateSubject.value.role
-    const names: Record<Role, string> = { author: '代理人 · 陈昊', examiner: '审查员 · 李岚', viewer: '观察者' }
     this.commit(state => state.annotations.push({
-      id: `annotation-${Date.now()}`, featureId, authorRole: role, authorName: names[role], text: trimmed, updatedAt: new Date().toISOString()
+      id: `annotation-${Date.now()}`, featureId, authorRole: role, authorName: roleNames[role], text: trimmed, updatedAt: new Date().toISOString()
     }))
   }
 
@@ -223,8 +306,17 @@ export class WorkbenchService implements OnDestroy {
     this.commit(state => {
       const version = state.versions.find(item => item.id === id)
       if (!version) return
+      const previousFeatures = state.features
       state.claims = clone(version.claims)
       state.features = clone(version.features)
+      // 恢复后：已不存在特征的证据清除；特征正文与恢复前不同的证据退回待确认
+      state.evidences = state.evidences.filter(record => state.features.some(feature => feature.id === record.featureId))
+      state.evidences.forEach(record => {
+        const before = previousFeatures.find(feature => feature.id === record.featureId)
+        const after = state.features.find(feature => feature.id === record.featureId)
+        if (before && after && before.text !== after.text) this.markPending(record)
+      })
+      this.syncSupportIds(state)
       if (!state.claims.some(claim => claim.id === state.selectedClaimId)) state.selectedClaimId = state.claims[0]?.id || ''
       state.selectedFeatureId = state.features.find(feature => feature.claimId === state.selectedClaimId)?.id || null
     })
@@ -265,25 +357,47 @@ export class WorkbenchService implements OnDestroy {
 
   exportCsv(): string {
     const state = this.stateSubject.value
-    const rows = state.features.map(feature => [
-      state.claims.find(claim => claim.id === feature.claimId)?.number || '', feature.label, feature.text,
-      state.features.find(item => item.id === feature.parentId)?.label || '',
-      feature.referenceIds.map(id => state.features.find(item => item.id === id)?.label || id).join('；'),
-      feature.supportIds.map(id => state.paragraphs.find(item => item.id === id)?.section || id).join('；')
-    ])
-    const csv = [['权利要求', '技术特征', '特征内容', '父级特征', '引用特征', '支持段落'], ...rows]
+    const header = ['权利要求', '技术特征', '特征内容', '支持段落', '证据状态', '原文摘录', '支持理由', '建立人', '确认人', '确认时间']
+    const rows: Array<Array<string | number>> = []
+    for (const feature of state.features) {
+      const records = state.evidences.filter(item => item.featureId === feature.id)
+      const claimNumber = state.claims.find(claim => claim.id === feature.claimId)?.number || ''
+      if (!records.length) {
+        rows.push([claimNumber, feature.label, feature.text, '', '缺少依据', '', '', '', '', ''])
+        continue
+      }
+      records.forEach(record => {
+        rows.push([
+          claimNumber, feature.label, feature.text,
+          state.paragraphs.find(item => item.id === record.paragraphId)?.section || record.paragraphId,
+          record.status === 'confirmed' ? '已确认' : '待确认',
+          record.excerpt, record.reason, record.createdByName,
+          record.confirmedByName || '', record.confirmedAt ? record.confirmedAt.replace('T', ' ').slice(0, 16) : ''
+        ])
+      })
+    }
+    const csv = [header, ...rows]
       .map(row => row.map(value => `"${String(value).replaceAll('"', '""')}"`).join(',')).join('\n')
-    return `\uFEFF${csv}`
+    return `﻿${csv}`
   }
 
   validate(state = this.stateSubject.value): ValidationIssue[] {
     const issues: ValidationIssue[] = []
     for (const feature of state.features) {
+      const records = state.evidences.filter(item => item.featureId === feature.id)
       if (!feature.text.trim()) issues.push({ id: `empty-${feature.id}`, severity: 'warning', type: 'empty-feature', featureId: feature.id, title: `${feature.label} 内容为空`, detail: '请补全技术特征文字，避免映射对象不明确。' })
-      if (!feature.supportIds.length) issues.push({ id: `support-${feature.id}`, severity: 'error', type: 'missing-support', featureId: feature.id, title: `${feature.label} 缺少说明书依据`, detail: '至少为一个说明书段落建立支持映射。' })
+      if (!records.length) issues.push({ id: `support-${feature.id}`, severity: 'error', type: 'missing-support', featureId: feature.id, title: `${feature.label} 缺少说明书依据`, detail: '至少建立一条带原文摘录的支持证据。' })
       if (this.hasReferenceCycle(feature, state.features)) issues.push({ id: `cycle-${feature.id}`, severity: 'error', type: 'cycle', featureId: feature.id, title: `${feature.label} 存在循环引用`, detail: '特征层级或引用关系形成闭环，请移除其中一条关系。' })
+      records.filter(record => record.status === 'pending').forEach(record => {
+        const section = state.paragraphs.find(item => item.id === record.paragraphId)?.section || record.paragraphId
+        issues.push({
+          id: `evidence-pending-${record.id}`, severity: 'warning', type: 'evidence-pending', featureId: feature.id,
+          title: `${feature.label} 的支持证据待确认`,
+          detail: `${section} 的证据尚未经审查员确认固定${record.excerpt ? `：「${record.excerpt}」` : '，且缺少原文摘录'}。`
+        })
+      })
     }
-    state.orphanMappings.forEach(item => issues.push({ id: item.id, severity: 'warning', type: 'orphan-mapping', title: '存在待清理映射', detail: item.reason }))
+    state.orphanMappings.forEach(item => issues.push({ id: item.id, severity: 'warning', type: 'orphan-mapping', title: '映射清理记录', detail: item.reason }))
     return issues
   }
 
@@ -299,6 +413,29 @@ export class WorkbenchService implements OnDestroy {
       return feature.referenceIds.some(visit)
     }
     return visit(start.id)
+  }
+
+  /** 源文（段落正文 / 特征正文）变化后，相关证据退回待确认并清除确认人 */
+  private revertEvidences(state: WorkbenchState, filter: { featureId?: string; paragraphId?: string }): void {
+    state.evidences.forEach(record => {
+      if (filter.featureId && record.featureId !== filter.featureId) return
+      if (filter.paragraphId && record.paragraphId !== filter.paragraphId) return
+      this.markPending(record)
+    })
+  }
+
+  private markPending(record: EvidenceRecord): void {
+    record.status = 'pending'
+    record.confirmedByRole = null
+    record.confirmedByName = null
+    record.confirmedAt = null
+  }
+
+  /** supportIds 作为证据的派生缓存，供覆盖统计与既有界面逻辑使用 */
+  private syncSupportIds(state: WorkbenchState): void {
+    state.features.forEach(feature => {
+      feature.supportIds = Array.from(new Set(state.evidences.filter(item => item.featureId === feature.id).map(item => item.paragraphId)))
+    })
   }
 
   private commit(recipe: (state: WorkbenchState) => void): void {
@@ -325,8 +462,23 @@ export class WorkbenchService implements OnDestroy {
   private loadState(): WorkbenchState {
     if (typeof localStorage === 'undefined') return demoState()
     try {
-      const stored = localStorage.getItem(STORAGE_KEY)
-      return stored ? { ...demoState(), ...JSON.parse(stored) } : demoState()
+      const storedRaw = localStorage.getItem(STORAGE_KEY)
+      if (!storedRaw) return demoState()
+      const stored = JSON.parse(storedRaw)
+      const merged: WorkbenchState = { ...demoState(), ...stored }
+      // 旧版本数据没有证据记录：由既有段落勾选迁移为待确认证据，等待补摘录与审查确认
+      if (!Array.isArray(stored.evidences)) {
+        merged.evidences = merged.features.flatMap(feature => feature.supportIds.map(paragraphId => {
+          const paragraph = merged.paragraphs.find(item => item.id === paragraphId)
+          return {
+            id: `evidence-migrated-${feature.id}-${paragraphId}`, featureId: feature.id, paragraphId,
+            excerpt: paragraph?.text || '', reason: '（由既有段落勾选迁移，请补全具体引用句与支持理由）',
+            status: 'pending' as const, createdByRole: feature.ownerRole, createdByName: roleNames[feature.ownerRole],
+            createdAt: new Date().toISOString(), confirmedByRole: null, confirmedByName: null, confirmedAt: null
+          }
+        }))
+      }
+      return merged
     } catch { return demoState() }
   }
 }

@@ -10,7 +10,7 @@ import { BadgeModule } from 'primeng/badge'
 import { DialogModule } from 'primeng/dialog'
 import { TooltipModule } from 'primeng/tooltip'
 import { Subscription } from 'rxjs'
-import type { Annotation, Claim, Feature, Role, ValidationIssue, WorkbenchState } from './models'
+import type { Annotation, Claim, EvidenceRecord, Feature, Paragraph, Role, ValidationIssue, WorkbenchState } from './models'
 import { WorkbenchService } from './workbench.service'
 
 @Component({
@@ -30,6 +30,11 @@ export class AppComponent implements OnInit, AfterViewInit, OnDestroy {
   versionDialog = false
   versionName = ''
   activeIssue: ValidationIssue | null = null
+  evidenceDialog = false
+  evidenceEditId: string | null = null
+  evidenceParagraphId = ''
+  evidenceExcerpt = ''
+  evidenceReason = ''
   roleOptions: Array<{ label: string; value: Role }> = [
     { label: '代理人（可编辑主数据与本人批注）', value: 'author' },
     { label: '审查员（可编辑本人批注）', value: 'examiner' },
@@ -69,14 +74,72 @@ export class AppComponent implements OnInit, AfterViewInit, OnDestroy {
   get errorCount(): number { return this.issues.filter(item => item.severity === 'error').length }
   get warningCount(): number { return this.issues.filter(item => item.severity === 'warning').length }
   get canEditMainData(): boolean { return this.state.role !== 'viewer' }
+  get canConfirmEvidence(): boolean { return this.state.role === 'examiner' }
   get mappedFeatureCount(): number { return this.claimFeatures.filter(feature => feature.supportIds.length > 0).length }
+  get pendingEvidenceCount(): number { return this.featureEvidences.filter(item => item.status === 'pending').length }
+  get confirmedEvidenceCount(): number { return this.featureEvidences.filter(item => item.status === 'confirmed').length }
+  get allEvidence(): EvidenceRecord[] { return this.state.evidences }
+  get auditPendingEvidence(): EvidenceRecord[] { return this.state.evidences.filter(item => item.status === 'pending') }
 
   claimLabel(id: string): string { return this.state.claims.find(item => item.id === id)?.title || '未命名权利要求' }
   featureLabel(id: string): string { return this.state.features.find(item => item.id === id)?.label || id }
   paragraphLabel(id: string): string { return this.state.paragraphs.find(item => item.id === id)?.section || id }
-  isMapped(feature: Feature, paragraphId: string): boolean { return feature.supportIds.includes(paragraphId) }
   isOwnAnnotation(annotation: Annotation): boolean { return annotation.authorRole === this.state.role }
   ownerLabel(role: Role): string { return ({ author: '代理人', examiner: '审查员', viewer: '观察者' })[role] }
+
+  get featureEvidences(): EvidenceRecord[] {
+    return this.selectedFeature ? this.state.evidences.filter(item => item.featureId === this.selectedFeature?.id) : []
+  }
+  evidencesForParagraph(paragraphId: string): EvidenceRecord[] {
+    return this.featureEvidences.filter(item => item.paragraphId === paragraphId)
+  }
+  hasEvidence(feature: Feature | undefined, paragraphId: string): boolean {
+    return !!feature && this.state.evidences.some(item => item.featureId === feature.id && item.paragraphId === paragraphId)
+  }
+  evidenceStatusLabel(record: EvidenceRecord): string { return record.status === 'confirmed' ? '已确认' : '待确认' }
+  evidenceFeatureLabel(record: EvidenceRecord): string { return this.featureLabel(record.featureId) }
+  evidenceParagraphText(record: EvidenceRecord): string { return this.state.paragraphs.find(item => item.id === record.paragraphId)?.text || '' }
+
+  openEvidenceDialog(paragraphId: string, record?: EvidenceRecord): void {
+    if (!this.selectedFeature || this.state.role === 'viewer') return
+    this.evidenceParagraphId = paragraphId
+    if (record) {
+      if (record.status === 'confirmed') return
+      this.evidenceEditId = record.id
+      this.evidenceExcerpt = record.excerpt
+      this.evidenceReason = record.reason
+    } else {
+      this.evidenceEditId = null
+      this.evidenceExcerpt = ''
+      this.evidenceReason = ''
+    }
+    this.evidenceDialog = true
+  }
+
+  closeEvidenceDialog(): void {
+    this.evidenceDialog = false
+    this.evidenceEditId = null
+    this.evidenceParagraphId = ''
+    this.evidenceExcerpt = ''
+    this.evidenceReason = ''
+  }
+
+  saveEvidence(): void {
+    if (!this.selectedFeature || !this.evidenceParagraphId) return
+    const excerpt = this.evidenceExcerpt.trim()
+    const reason = this.evidenceReason.trim()
+    if (!excerpt || !reason) return
+    if (this.evidenceEditId) this.service.updateEvidence(this.evidenceEditId, { excerpt, reason })
+    else this.service.addEvidence(this.selectedFeature.id, this.evidenceParagraphId, excerpt, reason)
+    this.closeEvidenceDialog()
+  }
+
+  /** 在原文中定位摘录位置，供展示“引用了哪一句”时高亮 */
+  excerptOffset(record: EvidenceRecord): number {
+    return this.evidenceParagraphText(record).indexOf(record.excerpt)
+  }
+  get evidenceDialogParagraph(): Paragraph | undefined { return this.state.paragraphs.find(item => item.id === this.evidenceParagraphId) }
+  get evidenceFormInvalid(): boolean { return !this.evidenceExcerpt.trim() || !this.evidenceReason.trim() }
 
   updateClaimField(field: 'title' | 'text' | 'number' | 'independent', event: Event): void {
     const element = event.target as HTMLInputElement

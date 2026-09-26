@@ -105,27 +105,58 @@
           <ng-template #noFeature><section class="panel empty-state large">请选择一个技术特征进行编辑。</section></ng-template>
 
           <section class="panel support-panel">
-            <div class="panel-heading"><span>说明书支持依据</span><span class="heading-actions"><p-badge [value]="selectedFeature?.supportIds?.length || 0" severity="success" /><p-button label="新增段落" icon="pi pi-plus" size="small" [disabled]="!canEditMainData" (onClick)="service.addParagraph()" /></span></div>
-            <p class="hint">选择段落即建立映射；取消选择会移除映射。只有至少一个段落时可消除“缺少依据”。</p>
-            <article *ngFor="let paragraph of state.paragraphs" class="paragraph-card" [class.mapped]="selectedFeature && isMapped(selectedFeature, paragraph.id)">
-              <label>
-                <input type="checkbox" [checked]="selectedFeature && isMapped(selectedFeature, paragraph.id)" [disabled]="!selectedFeature || !canEditMainData" (change)="selectedFeature && service.toggleParagraphMapping(selectedFeature.id, paragraph.id)">
+            <div class="panel-heading">
+              <span>支持证据记录</span>
+              <span class="heading-actions">
+                <p-badge [value]="'待确认 ' + pendingEvidenceCount" severity="warn" />
+                <p-badge [value]="'已确认 ' + confirmedEvidenceCount" severity="success" />
+                <p-button label="新增段落" icon="pi pi-plus" size="small" [disabled]="!canEditMainData" (onClick)="service.addParagraph()" />
+              </span>
+            </div>
+            <p class="hint">映射时记录引用的原文与支持理由；证据初始为“待确认”，经审查员核对后固定。段落正文或特征正文修改后，相关证据自动退回待确认。</p>
+            <article *ngFor="let paragraph of state.paragraphs" class="paragraph-card" [class.mapped]="hasEvidence(selectedFeature, paragraph.id)">
+              <header class="paragraph-head">
                 <span class="paragraph-label">{{ paragraph.section }}</span>
-              </label>
+                <p-button label="建立证据" icon="pi pi-paperclip" size="small" [outlined]="true" [disabled]="!selectedFeature || !canEditMainData" (onClick)="openEvidenceDialog(paragraph.id)" pTooltip="摘录原文并填写支持理由"></p-button>
+              </header>
               <div *ngIf="canEditMainData" class="paragraph-editor">
                 <input pInputText [value]="paragraph.section" aria-label="说明书段落编号" (change)="service.updateParagraph(paragraph.id, { section: $any($event.target).value })">
                 <textarea pTextarea rows="3" [value]="paragraph.text" aria-label="说明书段落正文" (change)="service.updateParagraph(paragraph.id, { text: $any($event.target).value })"></textarea>
                 <p-button label="删除段落" icon="pi pi-trash" severity="danger" [text]="true" size="small" (onClick)="service.deleteParagraph(paragraph.id)" />
               </div>
-              <p *ngIf="!canEditMainData">{{ paragraph.text }}</p>
+              <p class="paragraph-text" *ngIf="!canEditMainData">{{ paragraph.text }}</p>
+
+              <div class="evidence-list" *ngIf="selectedFeature">
+                <article *ngFor="let record of evidencesForParagraph(paragraph.id)" class="evidence-card" [class.confirmed]="record.status === 'confirmed'">
+                  <header>
+                    <span class="evidence-status" [class.confirmed]="record.status === 'confirmed'">
+                      <i class="pi" [class.pi-check-circle]="record.status === 'confirmed'" [class.pi-hourglass]="record.status === 'pending'"></i>{{ evidenceStatusLabel(record) }}
+                    </span>
+                    <span class="evidence-actions">
+                      <p-button label="确认固定" icon="pi pi-check" size="small" severity="success" [outlined]="true" *ngIf="record.status === 'pending' && canConfirmEvidence" (onClick)="service.confirmEvidence(record.id)" pTooltip="以审查员身份确认并固定该证据"></p-button>
+                      <p-button icon="pi pi-pencil" size="small" severity="secondary" [text]="true" [disabled]="!canEditMainData" *ngIf="record.status === 'pending'" (onClick)="openEvidenceDialog(paragraph.id, record)" pTooltip="补正摘录或理由"></p-button>
+                      <p-button icon="pi pi-trash" size="small" severity="danger" [text]="true" [disabled]="!canEditMainData" *ngIf="record.status === 'pending'" (onClick)="service.deleteEvidence(record.id)" pTooltip="删除待确认证据"></p-button>
+                      <i class="pi pi-lock" *ngIf="record.status === 'confirmed'" pTooltip="证据已确认固定；源文变更后才会退回待确认"></i>
+                    </span>
+                  </header>
+                  <blockquote class="evidence-excerpt">{{ record.excerpt }}</blockquote>
+                  <p class="evidence-reason">{{ record.reason }}</p>
+                  <footer class="evidence-meta">
+                    <span><i class="pi pi-user"></i>{{ record.createdByName }} 建立</span>
+                    <span *ngIf="record.confirmedByName"><i class="pi pi-verified"></i>{{ record.confirmedByName }} {{ record.confirmedAt | date:'MM-dd HH:mm' }} 确认</span>
+                    <span *ngIf="!record.confirmedByName" class="pending-note">等待审查员确认</span>
+                  </footer>
+                </article>
+              </div>
             </article>
+            <div *ngIf="!selectedFeature" class="empty-state">请先选择一个技术特征，再为其建立支持证据。</div>
           </section>
         </div>
 
         <div class="mapping-summary">
           <div><span>特征覆盖</span><strong>{{ claimFeatures.length }}</strong></div>
           <div><span>已建立依据</span><strong>{{ mappedFeatureCount }}</strong></div>
-          <div><span>待清理映射</span><strong>{{ state.orphanMappings.length }}</strong></div>
+          <div><span>本特征待确认证据</span><strong>{{ pendingEvidenceCount }}</strong></div>
           <div><span>批注总数</span><strong>{{ state.annotations.length }}</strong></div>
         </div>
 
@@ -188,15 +219,42 @@
 
       <div class="view" *ngIf="state.activeTab === 'audit'">
         <section class="panel audit-panel">
-          <div class="panel-heading"><span>提交前核对清单</span><span class="status-chip" [class.ready]="!errorCount">{{ errorCount ? errorCount + ' 项待处理' : '校验通过' }}</span></div>
+          <div class="panel-heading">
+            <span>提交前核对清单</span>
+            <span class="status-chip" [class.ready]="!errorCount">{{ errorCount ? errorCount + ' 项待处理' : '校验通过' }}</span>
+          </div>
+          <p class="hint">观察者仅可查看；证据的确认固定仅审查员可执行。源文修改后，已确认证据会退回“待确认”并清空确认人。</p>
+
+          <h3 class="audit-subhead">支持证据核对表（{{ allEvidence.length }} 条）</h3>
+          <div class="evidence-table-wrap">
+            <table class="evidence-table">
+              <thead>
+                <tr><th>技术特征</th><th>支持段落</th><th>状态</th><th>原文摘录 / 支持理由</th><th>建立人</th><th>确认人 / 时间</th><th></th></tr>
+              </thead>
+              <tbody>
+                <tr *ngFor="let record of allEvidence" [class.confirmed-row]="record.status === 'confirmed'">
+                  <td class="cell-feature">{{ evidenceFeatureLabel(record) }}</td>
+                  <td class="cell-section">{{ paragraphLabel(record.paragraphId) }}</td>
+                  <td><span class="evidence-status" [class.confirmed]="record.status === 'confirmed'"><i class="pi" [class.pi-check-circle]="record.status === 'confirmed'" [class.pi-hourglass]="record.status === 'pending'"></i>{{ evidenceStatusLabel(record) }}</span></td>
+                  <td class="cell-quote"><blockquote>{{ record.excerpt }}</blockquote><p>{{ record.reason }}</p></td>
+                  <td class="cell-meta">{{ record.createdByName }}</td>
+                  <td class="cell-meta"><ng-container *ngIf="record.confirmedByName; else noConfirmer">{{ record.confirmedByName }}<small>{{ record.confirmedAt | date:'yyyy-MM-dd HH:mm' }}</small></ng-container><ng-template #noConfirmer><span class="pending-note">—</span></ng-template></td>
+                  <td><p-button label="确认" icon="pi pi-check" size="small" severity="success" [outlined]="true" *ngIf="record.status === 'pending' && canConfirmEvidence" (onClick)="service.confirmEvidence(record.id)" /></td>
+                </tr>
+                <tr *ngIf="!allEvidence.length"><td colspan="7" class="empty-state">尚未建立任何支持证据。</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h3 class="audit-subhead">校验提醒</h3>
           <div class="audit-item" *ngFor="let issue of issues; let i = index">
             <span class="audit-index">{{ i + 1 }}</span>
             <div><strong>{{ issue.title }}</strong><p>{{ issue.detail }}</p></div>
             <p-button label="定位" icon="pi pi-arrow-right" [text]="true" (onClick)="locateIssue(issue)" />
           </div>
-          <div *ngIf="!issues.length" class="empty-success large"><i class="pi pi-check-circle"></i><strong>所有权利要求均具备说明书支持且引用关系有效。</strong></div>
+          <div *ngIf="!issues.length" class="empty-success large"><i class="pi pi-check-circle"></i><strong>所有权利要求均具备已确认的说明书支持且引用关系有效。</strong></div>
           <div class="orphan-area" *ngIf="state.orphanMappings.length">
-            <h3>已删除特征遗留的映射</h3>
+            <h3>映射清理记录</h3>
             <div class="orphan-row" *ngFor="let orphan of state.orphanMappings"><span>{{ orphan.reason }} 对应 {{ paragraphLabel(orphan.paragraphId) }}</span><p-button label="清理" size="small" severity="warn" (onClick)="service.clearOrphan(orphan.id)" /></div>
           </div>
         </section>
@@ -205,20 +263,22 @@
 
     <aside class="inspector">
       <section class="panel selected-summary" *ngIf="selectedFeature as feature; else noSelection">
-        <span class="eyebrow">映射状态</span>
+        <span class="eyebrow">证据状态</span>
         <h3>{{ feature.label }}</h3>
-        <div class="score-ring" [class.complete]="feature.supportIds.length" [class.incomplete]="!feature.supportIds.length">
-          <strong>{{ feature.supportIds.length }}</strong><small>支持段落</small>
+        <div class="score-ring" [class.complete]="confirmedEvidenceCount" [class.incomplete]="!confirmedEvidenceCount">
+          <strong>{{ confirmedEvidenceCount }}</strong><small>已确认证据</small>
         </div>
         <dl>
-          <dt>父级</dt><dd>{{ feature.parentId ? featureLabel(feature.parentId) : '顶层特征' }}</dd>
-          <dt>引用</dt><dd>{{ feature.referenceIds.length }} 个特征</dd>
+          <dt>待确认</dt><dd>{{ pendingEvidenceCount }} 条</dd>
+          <dt>已确认</dt><dd>{{ confirmedEvidenceCount }} 条</dd>
           <dt>批注</dt><dd>{{ featureAnnotations.length }} 条</dd>
         </dl>
         <div class="quick-map">
-          <strong>支持映射</strong>
-          <span *ngFor="let id of feature.supportIds">{{ paragraphLabel(id) }}</span>
-          <em *ngIf="!feature.supportIds.length">尚未选择说明书段落</em>
+          <strong>支持证据</strong>
+          <ng-container *ngFor="let record of featureEvidences">
+            <span [class.pending]="record.status === 'pending'">{{ paragraphLabel(record.paragraphId) }} · {{ evidenceStatusLabel(record) }}</span>
+          </ng-container>
+          <em *ngIf="!featureEvidences.length">尚未建立支持证据</em>
         </div>
       </section>
       <ng-template #noSelection><section class="panel empty-state">选择技术特征查看映射详情。</section></ng-template>
@@ -253,4 +313,24 @@
     <p>{{ issue.detail }}</p>
   </div>
   <ng-template pTemplate="footer"><p-button label="关闭" (onClick)="closeIssue()" /></ng-template>
+</p-dialog>
+
+<p-dialog [header]="evidenceEditId ? '补正支持证据' : '建立支持证据'" [(visible)]="evidenceDialog" [modal]="true" [style]="{ width: '620px' }">
+  <div class="dialog-body" *ngIf="selectedFeature">
+    <p>为 <strong>{{ selectedFeature.label }}</strong> 与 <strong>{{ paragraphLabel(evidenceParagraphId) }}</strong> 建立可核对的支持证据。证据保存后进入“待确认”，由审查员核对原文后固定。</p>
+    <div class="dialog-paragraph" *ngIf="evidenceDialogParagraph as paragraph">
+      <small>{{ paragraph.section }} 原文</small>
+      <p>{{ paragraph.text || '（段落正文为空，请先在左侧补录说明书原文）' }}</p>
+    </div>
+    <label>原文摘录（引用的具体句子）
+      <textarea pTextarea rows="3" [(ngModel)]="evidenceExcerpt" placeholder="从段落原文中摘录被引用的具体语句，避免只勾选整段…"></textarea>
+    </label>
+    <label>支持理由
+      <textarea pTextarea rows="3" [(ngModel)]="evidenceReason" placeholder="说明该原文如何支持本技术特征的限定…"></textarea>
+    </label>
+  </div>
+  <ng-template pTemplate="footer">
+    <p-button label="取消" severity="secondary" [outlined]="true" (onClick)="closeEvidenceDialog()" />
+    <p-button [label]="evidenceEditId ? '保存补正' : '保存证据'" icon="pi pi-save" [disabled]="evidenceFormInvalid" (onClick)="saveEvidence()" />
+  </ng-template>
 </p-dialog>
